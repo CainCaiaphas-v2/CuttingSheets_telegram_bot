@@ -4,8 +4,12 @@ import matplotlib.patches as patches
 from io import BytesIO
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
+import os
 
-# === Визуализация раскроя ===
+TOKEN = os.getenv("BOT_TOKEN") or "8333531773:AAGp3uuIIZe7FJWMq8jHMs1uUZLgKQ0TYlA"
+
+# Визуализация раскроя (как раньше)
 def make_cut_image(sheet_w, sheet_h, area_w, area_h):
     nx_full = area_w // sheet_w
     ny_full = area_h // sheet_h
@@ -17,7 +21,6 @@ def make_cut_image(sheet_w, sheet_h, area_w, area_h):
     ax.set_ylim(0, area_h)
     ax.set_aspect('equal')
 
-    # целые листы
     for i in range(nx_full):
         for j in range(ny_full):
             ax.add_patch(patches.Rectangle(
@@ -28,7 +31,6 @@ def make_cut_image(sheet_w, sheet_h, area_w, area_h):
                 facecolor='lightblue'
             ))
 
-    # вертикальные и горизонтальные полосы
     if rem_x > 0:
         for j in range(ny_full):
             ax.add_patch(patches.Rectangle(
@@ -68,35 +70,20 @@ def make_cut_image(sheet_w, sheet_h, area_w, area_h):
     plt.close(fig)
     return buf
 
-
-# === Telegram Bot Logic ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! 👋 Отправь мне размеры в формате:\n"
-        "`лист ширина высота | покрытие ширина высота`\n"
-        "Например:\n`лист 30 60 | покрытие 400 400`",
+        "Привет! 👋 Отправь размеры в формате:\n`лист ширина высота | покрытие ширина высота`\nПример: `лист 30 60 | покрытие 400 400`",
         parse_mode="Markdown"
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
-
     try:
-        # парсим сообщение
-        if "|" not in text:
-            await update.message.reply_text("❌ Формат неверный. Используй пример:\n`лист 30 60 | покрытие 400 400`", parse_mode="Markdown")
-            return
-
         left, right = text.split("|")
         sheet_parts = [int(x) for x in left.replace("лист", "").split()]
         area_parts = [int(x) for x in right.replace("покрытие", "").split()]
-
-        if len(sheet_parts) != 2 or len(area_parts) != 2:
-            raise ValueError
-
         sheet_w, sheet_h = sheet_parts
         area_w, area_h = area_parts
-
         buf = make_cut_image(sheet_w, sheet_h, area_w, area_h)
 
         nx_full = area_w // sheet_w
@@ -105,38 +92,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rem_y = area_h % sheet_h
         full_sheets = nx_full * ny_full
         extra_sheets = 0
-        if rem_x > 0:
-            extra_sheets += ny_full
-        if rem_y > 0:
-            extra_sheets += nx_full
-        if rem_x > 0 and rem_y > 0:
-            extra_sheets += 1
+        if rem_x > 0: extra_sheets += ny_full
+        if rem_y > 0: extra_sheets += nx_full
+        if rem_x > 0 and rem_y > 0: extra_sheets += 1
         total = full_sheets + extra_sheets
 
-        text_reply = (
-            f"📐 Размер листа: {sheet_w}×{sheet_h} см\n"
-            f"📏 Площадь покрытия: {area_w}×{area_h} см\n\n"
-            f"🧩 Целых листов: {full_sheets}\n"
-            f"✂️ Разрезанных листов: {extra_sheets}\n"
-            f"🔢 Всего листов: {total}"
-        )
+        text_reply = (f"📐 Размер листа: {sheet_w}×{sheet_h} см\n"
+                      f"📏 Площадь покрытия: {area_w}×{area_h} см\n\n"
+                      f"🧩 Целых листов: {full_sheets}\n"
+                      f"✂️ Разрезанных листов: {extra_sheets}\n"
+                      f"🔢 Всего листов: {total}")
 
         await update.message.reply_photo(photo=buf, caption=text_reply)
+    except Exception:
+        await update.message.reply_text("⚠️ Ошибка. Пример: `лист 30 60 | покрытие 400 400`", parse_mode="Markdown")
 
-    except Exception as e:
-        await update.message.reply_text("⚠️ Ошибка разбора данных. Пример: `лист 30 60 | покрытие 400 400`", parse_mode="Markdown")
-
-
-def main():
-    TOKEN = "8333531773:AAGp3uuIIZe7FJWMq8jHMs1uUZLgKQ0TYlA"
+# Async main для python-telegram-bot v21+
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
     print("✅ Бот запущен...")
-    app.run_polling()
-
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
